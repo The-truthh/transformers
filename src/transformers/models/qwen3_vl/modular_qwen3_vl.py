@@ -51,6 +51,8 @@ from ..qwen2_vl.modeling_qwen2_vl import (
     VisionRotaryEmbedding,
 )
 from ..qwen2_vl.processing_qwen2_vl import Qwen2VLImagesKwargs, Qwen2VLProcessor
+from ..openpangu_vl.modeling_openpangu_embedded import PanguEmbeddedAttention, PanguEmbeddedDecoderLayer
+from ..openpangu_vl.modeling_openpangu_vl import OpenPanguVLTextModel
 from ..qwen3.modeling_qwen3 import (
     Qwen3Attention,
     Qwen3DecoderLayer,
@@ -207,23 +209,27 @@ class Qwen3VLTextConfig(PretrainedConfig):
 
     def __init__(
         self,
-        vocab_size=151936,
+        vocab_size=153376,
         hidden_size=4096,
-        intermediate_size=22016,
-        num_hidden_layers=32,
+        intermediate_size=12800,
+        num_hidden_layers=34,
         num_attention_heads=32,
-        num_key_value_heads=32,
-        head_dim=128,
+        num_key_value_heads=8,
+        head_dim=None,
         hidden_act="silu",
-        max_position_embeddings=128000,
+        max_position_embeddings=32768,
         initializer_range=0.02,
-        rms_norm_eps=1e-6,
+        rms_norm_eps=1e-5,
         use_cache=True,
         tie_word_embeddings=False,
-        rope_theta=5000000.0,
+        rope_theta=64000000.0,
         rope_scaling=None,
-        attention_bias=False,
+        attention_bias=True,
         attention_dropout=0.0,
+        use_sliding_window=False,
+        sliding_window=4096,
+        max_window_layers=80,
+        bias=True,
         **kwargs,
     ):
         self.vocab_size = vocab_size
@@ -238,7 +244,7 @@ class Qwen3VLTextConfig(PretrainedConfig):
             num_key_value_heads = num_attention_heads
 
         self.num_key_value_heads = num_key_value_heads
-        self.head_dim = head_dim
+        self.head_dim = head_dim if head_dim is not None else hidden_size // num_attention_heads
         self.hidden_act = hidden_act
         self.initializer_range = initializer_range
         self.rms_norm_eps = rms_norm_eps
@@ -247,7 +253,15 @@ class Qwen3VLTextConfig(PretrainedConfig):
         self.rope_scaling = rope_scaling
         self.attention_bias = attention_bias
         self.attention_dropout = attention_dropout
+        self.use_sliding_window = use_sliding_window
+        self.sliding_window = sliding_window
+        self.max_window_layers = max_window_layers
+        self.bias = bias
 
+        if self.rope_scaling is not None and "type" in self.rope_scaling:
+            if self.rope_scaling["type"] == "mrope":
+                self.rope_scaling["type"] = "default"
+            self.rope_scaling["rope_type"] = self.rope_scaling["type"]
         rope_config_validation(self, ignore_keys={"mrope_section", "mrope_interleaved"})
 
         super().__init__(tie_word_embeddings=tie_word_embeddings, **kwargs)
@@ -527,10 +541,10 @@ class Qwen3VLModelOutputWithPast(Qwen2VLModelOutputWithPast):
 
 class Qwen3VLPreTrainedModel(Qwen2VLPreTrainedModel):
     config: Qwen3VLConfig
-    _no_split_modules = ["Qwen3VLTextDecoderLayer", "Qwen3VLVisionBlock"]
+    _no_split_modules = ["PanguEmbeddedDecoderLayer", "Qwen3VLVisionBlock"]
     _can_record_outputs = {
-        "hidden_states": Qwen3VLTextDecoderLayer,
-        "attentions": Qwen3VLTextAttention,
+        "hidden_states": PanguEmbeddedDecoderLayer,
+        "attentions": PanguEmbeddedAttention,
     }
 
 
@@ -732,22 +746,16 @@ class Qwen3VLVisionModel(Qwen3VLPreTrainedModel):
         "not a pure text-only model, as DeepStack integrates visual features into the early hidden states."
     )
 )
-class Qwen3VLTextModel(Qwen3VLPreTrainedModel, Qwen3Model):
+class Qwen3VLTextModel(OpenPanguVLTextModel):
     config: Qwen3VLTextConfig
-    _no_split_modules = ["Qwen3VLTextDecoderLayer"]
+    _no_split_modules = ["PanguEmbeddedDecoderLayer"]
+    _can_record_outputs = {
+        "hidden_states": PanguEmbeddedDecoderLayer,
+        "attentions": PanguEmbeddedAttention,
+    }
 
     def __init__(self, config: Qwen3VLTextConfig):
         super().__init__(config)
-        del self.has_sliding_layers
-
-    def _deepstack_process(
-        self, hidden_states: torch.Tensor, visual_pos_masks: torch.Tensor, visual_embeds: torch.Tensor
-    ):
-        visual_pos_masks = visual_pos_masks.to(hidden_states.device)
-        visual_embeds = visual_embeds.to(hidden_states.device, hidden_states.dtype)
-        local_this = hidden_states[visual_pos_masks, :].clone() + visual_embeds
-        hidden_states[visual_pos_masks, :] = local_this
-        return hidden_states
 
     @check_model_inputs
     @auto_docstring
@@ -767,80 +775,19 @@ class Qwen3VLTextModel(Qwen3VLPreTrainedModel, Qwen3Model):
     ) -> Union[tuple, BaseModelOutputWithPast]:
         r"""
         visual_pos_masks (`torch.Tensor` of shape `(batch_size, seqlen)`, *optional*):
-            The mask of the visual positions.
+            Kept for Qwen3-VL API compatibility. OpenPangu LLM ignores DeepStack visual residuals.
         deepstack_visual_embeds (`list[torch.Tensor]`, *optional*):
-            The deepstack visual embeddings. The shape is (num_layers, visual_seqlen, embed_dim).
-            The feature is extracted from the different visual encoder layers, and fed to the decoder
-            hidden states. It's from the paper DeepStack(https://arxiv.org/abs/2406.04334).
+            Kept for Qwen3-VL API compatibility. OpenPangu LLM ignores DeepStack visual residuals.
         """
-        if (input_ids is None) ^ (inputs_embeds is not None):
-            raise ValueError("You must specify exactly one of input_ids or inputs_embeds")
-
-        # torch.jit.trace() doesn't support cache objects in the output
-        if use_cache and past_key_values is None and not torch.jit.is_tracing():
-            past_key_values = DynamicCache(config=self.config)
-
-        if inputs_embeds is None:
-            inputs_embeds = self.embed_tokens(input_ids)
-
-        if cache_position is None:
-            past_seen_tokens = past_key_values.get_seq_length() if past_key_values is not None else 0
-            cache_position = torch.arange(
-                past_seen_tokens, past_seen_tokens + inputs_embeds.shape[1], device=inputs_embeds.device
-            )
-
-        # the hard coded `3` is for temporal, height and width.
-        if position_ids is None:
-            position_ids = cache_position.view(1, 1, -1).expand(3, inputs_embeds.shape[0], -1)
-        elif position_ids.ndim == 2:
-            position_ids = position_ids[None, ...].expand(3, position_ids.shape[0], -1)
-
-        if position_ids.ndim == 3 and position_ids.shape[0] == 4:
-            text_position_ids = position_ids[0]
-            position_ids = position_ids[1:]
-        else:
-            text_position_ids = position_ids[0]
-
-        attention_mask = create_causal_mask(
-            config=self.config,
-            input_embeds=inputs_embeds,
+        return super().forward(
+            input_ids=input_ids,
             attention_mask=attention_mask,
+            position_ids=position_ids,
+            past_key_values=past_key_values,
+            inputs_embeds=inputs_embeds,
+            use_cache=use_cache,
             cache_position=cache_position,
-            past_key_values=past_key_values,
-            position_ids=text_position_ids,
-        )
-
-        hidden_states = inputs_embeds
-
-        # create position embeddings to be shared across the decoder layers
-        position_embeddings = self.rotary_emb(hidden_states, position_ids)
-
-        # decoder layers
-        for layer_idx, decoder_layer in enumerate(self.layers):
-            layer_outputs = decoder_layer(
-                hidden_states,
-                attention_mask=attention_mask,
-                position_ids=text_position_ids,
-                past_key_values=past_key_values,
-                cache_position=cache_position,
-                position_embeddings=position_embeddings,
-                **kwargs,
-            )
-            hidden_states = layer_outputs
-
-            # add visual features to the hidden states of first several layers
-            if deepstack_visual_embeds is not None and layer_idx in range(len(deepstack_visual_embeds)):
-                hidden_states = self._deepstack_process(
-                    hidden_states,
-                    visual_pos_masks,
-                    deepstack_visual_embeds[layer_idx],
-                )
-
-        hidden_states = self.norm(hidden_states)
-
-        return BaseModelOutputWithPast(
-            last_hidden_state=hidden_states,
-            past_key_values=past_key_values,
+            **kwargs,
         )
 
 
@@ -848,12 +795,18 @@ class Qwen3VLTextModel(Qwen3VLPreTrainedModel, Qwen3Model):
 class Qwen3VLModel(Qwen2_5_VLModel):
     config: Qwen3VLConfig
     _checkpoint_conversion_mapping = {}
-    _no_split_modules = ["Qwen3VLTextDecoderLayer", "Qwen3VLVisionBlock"]
+    _no_split_modules = ["PanguEmbeddedDecoderLayer", "Qwen3VLVisionBlock"]
 
     def __init__(self, config):
         super().__init__(config)
         self.visual = Qwen3VLVisionModel._from_config(config.vision_config)
         self.language_model = Qwen3VLTextModel._from_config(config.text_config)
+        if config.vision_config.out_hidden_size != config.text_config.hidden_size:
+            self.visual_projection = nn.Linear(
+                config.vision_config.out_hidden_size, config.text_config.hidden_size, bias=True
+            )
+        else:
+            self.visual_projection = nn.Identity()
 
     def get_rope_index(
         self,
@@ -986,6 +939,7 @@ class Qwen3VLModel(Qwen2_5_VLModel):
         """
         pixel_values = pixel_values.type(self.visual.dtype)
         image_embeds, deepstack_image_embeds = self.visual(pixel_values, grid_thw=image_grid_thw)
+        image_embeds = self.visual_projection(image_embeds)
         split_sizes = (image_grid_thw.prod(-1) // self.visual.spatial_merge_size**2).tolist()
         image_embeds = torch.split(image_embeds, split_sizes)
         return image_embeds, deepstack_image_embeds

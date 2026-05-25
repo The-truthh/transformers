@@ -166,23 +166,27 @@ class Qwen3VLTextConfig(PretrainedConfig):
 
     def __init__(
         self,
-        vocab_size=151936,
+        vocab_size=153376,
         hidden_size=4096,
-        intermediate_size=22016,
-        num_hidden_layers=32,
+        intermediate_size=12800,
+        num_hidden_layers=34,
         num_attention_heads=32,
-        num_key_value_heads=32,
-        head_dim=128,
+        num_key_value_heads=8,
+        head_dim=None,
         hidden_act="silu",
-        max_position_embeddings=128000,
+        max_position_embeddings=32768,
         initializer_range=0.02,
-        rms_norm_eps=1e-6,
+        rms_norm_eps=1e-5,
         use_cache=True,
         tie_word_embeddings=False,
-        rope_theta=5000000.0,
+        rope_theta=64000000.0,
         rope_scaling=None,
-        attention_bias=False,
+        attention_bias=True,
         attention_dropout=0.0,
+        use_sliding_window=False,
+        sliding_window=4096,
+        max_window_layers=80,
+        bias=True,
         **kwargs,
     ):
         self.vocab_size = vocab_size
@@ -197,7 +201,7 @@ class Qwen3VLTextConfig(PretrainedConfig):
             num_key_value_heads = num_attention_heads
 
         self.num_key_value_heads = num_key_value_heads
-        self.head_dim = head_dim
+        self.head_dim = head_dim if head_dim is not None else hidden_size // num_attention_heads
         self.hidden_act = hidden_act
         self.initializer_range = initializer_range
         self.rms_norm_eps = rms_norm_eps
@@ -206,7 +210,15 @@ class Qwen3VLTextConfig(PretrainedConfig):
         self.rope_scaling = rope_scaling
         self.attention_bias = attention_bias
         self.attention_dropout = attention_dropout
+        self.use_sliding_window = use_sliding_window
+        self.sliding_window = sliding_window
+        self.max_window_layers = max_window_layers
+        self.bias = bias
 
+        if self.rope_scaling is not None and "type" in self.rope_scaling:
+            if self.rope_scaling["type"] == "mrope":
+                self.rope_scaling["type"] = "default"
+            self.rope_scaling["rope_type"] = self.rope_scaling["type"]
         rope_config_validation(self, ignore_keys={"mrope_section", "mrope_interleaved"})
 
         super().__init__(tie_word_embeddings=tie_word_embeddings, **kwargs)
