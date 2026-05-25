@@ -292,6 +292,8 @@ CONFIG_MAPPING_NAMES = OrderedDict[str, str](
         ("olmoe", "OlmoeConfig"),
         ("omdet-turbo", "OmDetTurboConfig"),
         ("oneformer", "OneFormerConfig"),
+        ("openpangu_vl", "OpenPanguVLConfig"),
+        ("openpangu_vl_text", "OpenPanguVLTextConfig"),
         ("open-llama", "OpenLlamaConfig"),
         ("openai-gpt", "OpenAIGPTConfig"),
         ("opt", "OPTConfig"),
@@ -746,6 +748,8 @@ MODEL_NAMES_MAPPING = OrderedDict[str, str](
         ("olmoe", "OLMoE"),
         ("omdet-turbo", "OmDet-Turbo"),
         ("oneformer", "OneFormer"),
+        ("openpangu_vl", "OpenPanguVL"),
+        ("openpangu_vl_text", "OpenPanguVL"),
         ("open-llama", "OpenLlama"),
         ("openai-gpt", "OpenAI GPT"),
         ("opt", "OPT"),
@@ -955,6 +959,7 @@ DEPRECATED_MODELS = [
 SPECIAL_MODEL_TYPE_TO_MODULE_NAME = OrderedDict[str, str](
     [
         ("openai-gpt", "openai"),
+        ("openpangu_vl_text", "openpangu_vl"),
         ("data2vec-audio", "data2vec"),
         ("data2vec-text", "data2vec"),
         ("data2vec-vision", "data2vec"),

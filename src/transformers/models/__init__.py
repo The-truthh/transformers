@@ -249,6 +249,7 @@ if TYPE_CHECKING:
     from .olmoe import *
     from .omdet_turbo import *
     from .oneformer import *
+    from .openpangu_vl import *
     from .openai import *
     from .opt import *
     from .ovis2 import *
