@@ -65,7 +65,17 @@ def rescale_and_normalize(
     if do_normalize:
         mean = torch.tensor(image_mean, device=images.device, dtype=torch.float32)
         std = torch.tensor(image_std, device=images.device, dtype=torch.float32)
-        if images.shape[-1] != mean.shape[0]:
+        if images.ndim >= 3 and images.shape[-3] == mean.shape[0]:
+            view_shape = [1] * images.ndim
+            view_shape[-3] = mean.shape[0]
+            mean = mean.view(view_shape)
+            std = std.view(view_shape)
+        elif images.ndim >= 2 and images.shape[1] == mean.shape[0]:
+            view_shape = [1] * images.ndim
+            view_shape[1] = mean.shape[0]
+            mean = mean.view(view_shape)
+            std = std.view(view_shape)
+        elif images.shape[-1] != mean.shape[0]:
             repeats = images.shape[-1] // mean.shape[0]
             mean = mean.repeat_interleave(repeats)
             std = std.repeat_interleave(repeats)
