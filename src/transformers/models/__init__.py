@@ -254,6 +254,7 @@ if TYPE_CHECKING:
     from .ovis2 import *
     from .owlv2 import *
     from .owlvit import *
+    from .pangu_v2_moe import *
     from .paligemma import *
     from .parakeet import *
     from .patchtsmixer import *

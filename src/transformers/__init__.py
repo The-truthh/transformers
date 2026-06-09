@@ -149,6 +149,7 @@ _import_structure = {
     ],
     # Models
     "onnx": [],
+    "models.pangu_v2_moe.configuration_pangu_v2_moe": ["PanguUltraMoEConfig", "PanguV2MoEConfig"],
     "pipelines": [
         "AudioClassificationPipeline",
         "AutomaticSpeechRecognitionPipeline",
@@ -473,6 +474,13 @@ else:
     _import_structure["modeling_outputs"] = []
     _import_structure["modeling_rope_utils"] = ["ROPE_INIT_FUNCTIONS", "dynamic_rope_update"]
     _import_structure["modeling_utils"] = ["PreTrainedModel", "AttentionInterface"]
+    _import_structure["models.pangu_v2_moe.modeling_pangu_v2_moe"] = [
+        "PanguUltraMoEForCausalLM",
+        "PanguUltraMoEModel",
+        "PanguV2MoEForCausalLM",
+        "PanguV2MoEModel",
+        "PanguV2MoEPreTrainedModel",
+    ]
     _import_structure["masking_utils"] = ["AttentionMaskInterface"]
     _import_structure["optimization"] = [
         "Adafactor",
@@ -792,6 +800,13 @@ if TYPE_CHECKING:
     from .modeling_utils import AttentionInterface as AttentionInterface
     from .modeling_utils import PreTrainedModel as PreTrainedModel
     from .models import *
+    from .models.pangu_v2_moe import PanguUltraMoEConfig as PanguUltraMoEConfig
+    from .models.pangu_v2_moe import PanguUltraMoEForCausalLM as PanguUltraMoEForCausalLM
+    from .models.pangu_v2_moe import PanguUltraMoEModel as PanguUltraMoEModel
+    from .models.pangu_v2_moe import PanguV2MoEConfig as PanguV2MoEConfig
+    from .models.pangu_v2_moe import PanguV2MoEForCausalLM as PanguV2MoEForCausalLM
+    from .models.pangu_v2_moe import PanguV2MoEModel as PanguV2MoEModel
+    from .models.pangu_v2_moe import PanguV2MoEPreTrainedModel as PanguV2MoEPreTrainedModel
     from .models.mamba.modeling_mamba import MambaCache as MambaCache
     from .models.timm_wrapper import TimmWrapperImageProcessor as TimmWrapperImageProcessor
 
